@@ -1,0 +1,187 @@
+---
+title: "Economic and Public Health Impacts of Weather Events in the U.S."
+author: "Ximena Ramirez"
+date: "7/1/2020"
+output:
+  pdf_document: default
+  html_document: default
+keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Synopsis
+
+Storms and other severe weather events cause both public health and economic problems for communities and municipalities within the United States. Many severe events can result in fatalities, injuries, and property damage, and preventing such outcomes to the extent possible is a key concern.
+
+This project involves exploring the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database.
+
+The analysis addresses the following questions:
+
+1. Across the United States, which types of events are most harmful with respect to population health?
+2. Across the United States, which types of events have the greatest economic consequences?
+
+According to the analysis, the results are:
+
+1. **Tornados** are the most harmful with respect to population health.
+2. **Floods** have the greatest economic consequences.
+
+---
+
+## Data Processing  
+
+The following packages will be used:
+```{r packages, message = FALSE}
+#Load necessary packages
+library(plyr)
+library(dplyr)
+library(ggplot2)
+```
+
+Download and read file containing the original data set.
+
+```{r download, cache = TRUE}
+#download file
+
+filename <- "repdata_data_StormData.csv.bz2"
+
+if (!file.exists(filename)) {
+        fileURL <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+        download.file(fileURL, destfile = filename)
+}
+
+#read file
+stormdata <- read.csv(filename)
+```
+
+Take a quick look at the data, and see if it is possible to subset the data frame.
+```{r}
+names(stormdata)
+head(stormdata)
+str(stormdata)
+```
+
+The following variables will be defined and used for further analysis in order to answer the questions:
+
+- EVTYPE: Event Type
+- FATALITIES: Number of Fatalities
+- INJURIES: Number of Injuries
+- PROPDMG: Property Damage
+- PROPDMGEXP: Unit of Porperty Damage (K, B, M)* 
+- CROPDMG: Crop Damage
+- CROPDMGEXP: Unit of Crop Damage (K, B, M)*
+
+***Note**: As specified by the National Weather Service Storm Data Documentation, "Estimates should be rounded to three significant digits, followed by an alphabetical character signifying the magnitude of the number... Alphabetical characters used to signify magnitude include “K” for thousands, “M” for millions, and “B” for billions." 
+
+```{r subset}
+#subset variables specified above
+data_sub <- select(stormdata, c("EVTYPE", "FATALITIES", "INJURIES", "PROPDMG", "PROPDMGEXP", "CROPDMG", "CROPDMGEXP"))
+
+str(data_sub)
+```
+
+Looking at the output from `str(data_sub)`, `PROPDMGEXP` and `CROPDMGEXP` are factor variables (expected), but they have more than 3 levels (unexpected). 
+
+```{r}
+unique(data_sub$PROPDMGEXP)
+unique(data_sub$CROPDMGEXP)
+```
+
+These variables will be refactored due to possible input error. (See **Note** above.) The factor levels will be changed according to the following:
+
+- K, M, B levels will be changed to their numeric values; 10^3, 10^6, 10^9, respectively.
+
+- "?", "-", "+" will have a value of 0
+
+- "", "0" will have a value of 1.
+
+```{r refactor}
+data_sub$PROPDMGEXP <- mapvalues(data_sub$PROPDMGEXP, from = levels(data_sub$PROPDMGEXP), to = c(1, 0, 0, 0, 1, 10, 10^2, 10^3, 10^4, 10^5, 10^6, 10^7, 10^8, 10^9, 10^2, 10^2, 10^3, 10^6, 10^6))
+
+data_sub$CROPDMGEXP <- mapvalues(data_sub$CROPDMGEXP, from = levels(data_sub$CROPDMGEXP), to = c(1, 0, 1, 10^2, 10^9, 10^3, 10^3, 10^6, 10^6))
+```
+
+Now multiply the property and crop damages by their respective exponent column, in order to find the total values for property damage and crop damage. 
+
+```{r total_damage}
+#Calculate total property damage
+data_sub$PROPDMGEXP <- as.numeric(as.character(data_sub$PROPDMGEXP)) #change to character and then numeric to perserve exponent
+data_sub <- mutate(data_sub, PROPDMG.TOTAL = PROPDMG * PROPDMGEXP)
+
+#Calculate total crop damage
+data_sub$CROPDMGEXP <- as.numeric(as.character(data_sub$CROPDMGEXP)) #change to character and then numeric to perserve exponent
+data_sub <- mutate(data_sub, CROPDMG.TOTAL = CROPDMG * CROPDMGEXP)
+
+```
+
+The `data_sub` data frame will now be used for analysis in order to answer the stated questions.
+
+---
+
+## Analysis & Results
+
+### Which events are most harmful to population health?
+
+The data from the `INJURIES` and `FATALITIES` variables indicate impact to public health. A boxplot will display the event type with its associated injuries and fatalities.
+
+```{r injury_plot}
+data_sub %>%
+        select(INJURIES, EVTYPE) %>%
+        group_by(EVTYPE) %>%
+        summarise(injury = sum(INJURIES)) %>%
+        top_n(n = 10, wt = injury) %>% #filter out top 10 events wrt injury
+        ggplot(aes(x = reorder(EVTYPE, -injury), y = injury, fill = EVTYPE)) + #reorder barplot to plot injury in descending order
+        geom_bar(stat = "identity", show.legend = FALSE) +
+        labs(x = "Event", y = "Injuries", title = "Top 10 Highest Injury Events") +
+        geom_text(aes(label=injury), size = 4, hjust = 0.5, vjust = -0.1) + #add totals on top of each bar
+        theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) #rotate yaxis labels
+```
+
+Looking at the graph, `TORNADO` events have caused the most injuries at 91,346.
+
+Now for fatalities:
+
+```{r fatality_plot}
+data_sub %>%
+        select(FATALITIES, EVTYPE) %>%
+        group_by(EVTYPE) %>%
+        summarise(fatality = sum(FATALITIES)) %>%
+        top_n(n = 10, wt = fatality) %>%
+        ggplot(aes(x = reorder(EVTYPE, -fatality), y = fatality, fill = EVTYPE)) +
+        geom_bar(stat = "identity", show.legend = FALSE) +
+        labs(x = "Event", y = "Fatalities", title = "Top 10 Highest Fatality Events") +
+        geom_text(aes(label=fatality), size = 4, hjust = 0.5, vjust = -0.1) +
+        theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+Looking at the graph, `TORNADO` events have caused the most fatalities at 5,633.
+
+**Therefore, it is concluded that `TORNADO` events are the most harmful with respect to public health.**
+
+### Which events have the greatest economic consequences?
+
+The data from the `PROPDMG.TOTAL` and `CROPDMG.TOTAL` variables indicate total propoerty and crop damage, respectively. To illustrate economic impact, a boxplot plotting event type and **combined** property and crop damages will be created.
+
+```{r damage_plot}
+data_sub %>%
+        select(PROPDMG.TOTAL, CROPDMG.TOTAL, EVTYPE) %>% 
+        #combine crop and prop damages
+        group_by(EVTYPE) %>%
+        summarise(damage = sum(PROPDMG.TOTAL + CROPDMG.TOTAL)/10^9) %>% 
+        #divide by 10^9 to look at damages in billions of dollars
+        top_n(n = 10, wt = damage) %>% #filter out top 10 events wrt injury
+        ggplot(aes(x = reorder(EVTYPE, -damage), y = damage, fill = EVTYPE)) +
+        geom_bar(stat = "identity", show.legend = FALSE) +
+        labs(x = "Event", y = "Damages (in billions of dollars)", title = "Top 10 Highest Damage Events") +
+        theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+Looking at the graph, `FLOOD` events have caused the most damages at about $150 billion.
+
+### Results
+
+According to the analysis,
+
+1. Across the United States, **tornados** are the most harmful with respect to population health.
+2. Across the United States, **floods** have the greatest economic consequences.
